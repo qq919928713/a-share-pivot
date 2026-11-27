@@ -38,6 +38,40 @@ h1 .x{color:var(--gold);font-weight:400;padding:0 6px}
 .btn:hover{border-color:#CFC5B0;color:var(--ink);background:#FCFAF5}
 .btn:active{transform:translateY(1px)}
 
+/* ---------- advice ---------- */
+.advice{position:relative;background:#FCF9F1;border:1px solid var(--line);border-radius:18px;
+  padding:17px 22px 15px;margin-bottom:16px;box-shadow:var(--shadow);overflow:hidden}
+.advice::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--gold)}
+.adv-hd{display:flex;align-items:center;gap:12px;margin-bottom:13px}
+.adv-tag{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3);font-weight:700}
+.adv-title{font-size:15px;font-weight:750;letter-spacing:-.01em}
+.adv-when{margin-left:auto;font-size:11.5px;color:var(--ink3)}
+.adv-body{display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:12px}
+.adv-cell{border:1px solid var(--line2);border-radius:13px;padding:11px 15px 12px;background:#fff}
+.adv-name{font-size:11.5px;color:var(--ink2);display:flex;align-items:center;gap:6px;font-weight:600}
+.adv-code{font-size:9.5px;color:var(--ink3);border:1px solid var(--line);border-radius:4px;padding:0 4px;font-weight:500}
+.adv-act{margin-left:auto;font-size:10.5px;font-weight:700;padding:1.5px 8px;border-radius:6px;
+  background:rgba(140,133,122,.1);color:var(--ink2);white-space:nowrap}
+.t-buy .adv-act{background:rgba(178,58,46,.09);color:var(--red)}
+.t-sell .adv-act{background:rgba(43,110,92,.09);color:var(--green)}
+.t-lean-buy .adv-act{background:rgba(196,105,93,.1);color:#B05B4F}
+.t-lean-sell .adv-act{background:rgba(90,140,124,.11);color:#4F7E6F}
+.adv-verdict{display:flex;align-items:baseline;gap:8px;margin:7px 0 6px}
+.adv-verdict b{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.adv-verdict .arw{font-size:15px;font-weight:700}
+.adv-stats{font-size:11px;color:var(--ink3);line-height:1.5}
+.adv-stats b{color:var(--ink2);font-weight:700;font-variant-numeric:tabular-nums}
+.adv-note{font-size:11.5px;color:var(--ink2);line-height:1.68}
+.adv-note b{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+.adv-note .k{display:block;font-size:9.5px;letter-spacing:.2em;color:var(--ink3);font-weight:700;margin-bottom:3px}
+.adv-note .fine{display:block;margin-top:6px;font-size:10.5px;color:var(--ink3);line-height:1.55}
+.t-buy b,.t-buy .arw{color:var(--red)}
+.t-sell b,.t-sell .arw{color:var(--green)}
+.t-lean-buy b,.t-lean-buy .arw{color:#C4695D}
+.t-lean-sell b,.t-lean-sell .arw{color:#5A8C7C}
+.t-flat b,.t-flat .arw{color:var(--ink3)}
+@media (max-width:1100px){.adv-body{grid-template-columns:1fr 1fr}.adv-note{grid-column:span 2}}
+
 /* ---------- grid ---------- */
 .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
 .c8{grid-column:span 8}.c4{grid-column:span 4}.c12{grid-column:span 12}.c6{grid-column:span 6}
@@ -157,6 +191,8 @@ tbody tr:last-child td{border-bottom:0}
       <button class="btn" id="refreshBtn">刷新</button>
     </div>
   </header>
+
+  <section class="advice" id="advice"></section>
 
   <div class="grid">
 
@@ -874,10 +910,94 @@ function rebuildPivots(){
   D.meta.bank_median_lag = median(bm.map(p=>Math.abs(p.bank.lag)));
 }
 
-/* ---------------- boot ---------------- */
+/* ---------------- advice ---------------- */
+function advFwd20(type){
+  const kc = [], bank = [];
+  D.pivots.forEach(p => {
+    if(p.type !== type) return;
+    if(p.idx + 20 >= D.dates.length) return;
+    kc.push((D.kc[p.idx+20] / D.kc[p.idx] - 1) * 100);
+    bank.push((D.bank[p.idx+20] / D.bank[p.idx] - 1) * 100);
+  });
+  return {kc, bank};
+}
+
+function advVerdict(v){
+  const n = v.length;
+  if(n < 4) return {t:"flat", label:"样本不足", act:"观望", n};
+  const med = median(v), up = v.filter(x => x > 0).length / n;
+  let r;
+  if(med >= 2.5 && up >= 0.62)      r = {t:"buy",       label:"偏多", act:"建议加仓"};
+  else if(med <= -2.0 && up <= 0.40) r = {t:"sell",      label:"偏空", act:"建议减仓"};
+  else if(med > 0.5 && up >= 0.55)   r = {t:"lean-buy",  label:"弱偏多", act:"可小仓"};
+  else if(med < -0.5 && up <= 0.45)  r = {t:"lean-sell", label:"弱偏空", act:"宜减不宜加"};
+  else                               r = {t:"flat",      label:"无优势", act:"建议不动"};
+  return {...r, n, med, up};
+}
+
+// 拐点越久，信号越弱；超过 25 个交易日直接作废
+function advDecay(v, age){
+  if(age > 25) return {...v, t:"flat", label:"已过期", act:"建议不动", stale:true};
+  if(age > 15 && v.t === "buy")  return {...v, t:"lean-buy",  label:"偏多渐弱", act:"可小仓"};
+  if(age > 15 && v.t === "sell") return {...v, t:"lean-sell", label:"偏空渐弱", act:"宜减不宜加"};
+  return v;
+}
+
+const advArrow = t => t === "buy" || t === "lean-buy" ? "↗"
+                   : t === "sell" || t === "lean-sell" ? "↘" : "—";
+
+function renderAdvice(){
+  const el = $("advice"); if(!el || !D.pivots.length) return;
+  const n = D.dates.length;
+  const p = D.pivots[D.pivots.length - 1];
+  const age = n - 1 - p.idx;
+  const isH = p.type === "H";
+  const stats = advFwd20(p.type);
+  const kcV = advDecay(advVerdict(stats.kc), age);
+  const bkV = advDecay(advVerdict(stats.bank), age);
+
+  const kcSince = (D.kc[n-1] / D.kc[p.idx] - 1) * 100;
+  const bkSince = (D.bank[n-1] / D.bank[p.idx] - 1) * 100;
+  const dev = (D.total[n-1] / D.ma20[n-1] - 1) * 100;
+  const amtChg = (D.total[n-1] / p.value - 1) * 100;
+
+  const devs = [];
+  for(let i = 20; i < n; i++) devs.push((D.total[i] / D.ma20[i] - 1) * 100);
+  const pr = devs.length ? devs.filter(x => x <= dev).length / devs.length * 100 : 0;
+
+  const sg = x => (x > 0 ? "+" : "") + x.toFixed(1) + "%";
+  const cell = (name, code, v, since) => `
+    <div class="adv-cell t-${v.t}">
+      <div class="adv-name">${name}<span class="adv-code">${code}</span><span class="adv-act">${v.act}</span></div>
+      <div class="adv-verdict"><b>${v.label}</b><span class="arw">${advArrow(v.t)}</span></div>
+      <div class="adv-stats">历史 <b>${v.n ? Math.round(v.up * 100) : "—"}%</b> 上涨（${v.n ? Math.round(v.up * v.n) : 0}/${v.n || 0}）·
+        中位 <b>${v.med == null ? "—" : (v.med > 0 ? "+" : "") + v.med.toFixed(1) + "%"}</b><br>
+        拐点至今 <b>${sg(since)}</b></div>
+    </div>`;
+
+  el.innerHTML = `
+    <div class="adv-hd">
+      <div class="adv-tag">今日信号</div>
+      <div class="adv-title">${isH ? "量能高点" : "量能低点"}后第 ${age} 个交易日</div>
+      <div class="adv-when">基于 ${D.dates[n-1]} 收盘 · 历史 ${stats.kc.length} 次同类拐点</div>
+    </div>
+    <div class="adv-body">
+      ${cell("科创50ETF", "588000", kcV, kcSince)}
+      ${cell("银行ETF", "512800", bkV, bkSince)}
+      <div class="adv-note">
+        <span class="k">信号依据</span>
+        触发：<b>${p.date}</b> 量能${isH ? "高" : "低"}点 <b>${p.value.toLocaleString("zh-CN", {maximumFractionDigits:0})}</b> 亿${p.provisional ? "（待确认）" : ""}；
+        此后成交额 <b>${sg(amtChg)}</b>，现偏离 20 日均线 <b>${sg(dev)}</b>，处近三年 <b>${Math.round(pr)}%</b> 分位。
+        <span class="fine">口径：${isH ? "高" : "低"}点其后 20 个交易日涨跌幅。样本仅 ${stats.kc.length} 次，信号随天数衰减，仅供参考，不构成投资建议。</span>
+      </div>
+    </div>`;
+}
+
+
 function renderAll(){
   rebuildPivots();
   renderHeader(); renderStats(); renderHero(); renderLiveCards();
+  renderAdvice();
   renderMain(); renderEtf(); renderLatest(); renderTable();
 }
 renderAll();
